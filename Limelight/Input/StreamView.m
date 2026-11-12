@@ -33,7 +33,13 @@ static const double X1_MOUSE_SPEED_DIVISOR = 2.5;
     float lastMouseX;
     float lastMouseY;
     CGPoint lastScrollTranslation;
-    
+
+    // Hybrid mouse (iPhone) state and on-screen diagnostics
+    NSUInteger lastHybridButtonEventCount;
+    NSUInteger hybridRegionCalls;
+    NSUInteger hybridHoverCalls;
+    NSUInteger absolutePositionsSent;
+
     // Citrix X1 mouse support
     X1Mouse* x1mouse;
     double accumulatedMouseDeltaX;
@@ -114,6 +120,16 @@ static const double X1_MOUSE_SPEED_DIVISOR = 2.5;
         continuousMouseWheelRecognizer.allowedScrollTypesMask = UIScrollTypeMaskContinuous;
         continuousMouseWheelRecognizer.allowedTouchTypes = @[@(UITouchTypeIndirectPointer)];
         [self addGestureRecognizer:continuousMouseWheelRecognizer];
+
+        // UIKit may not ask for a pointer region on every move, so also track
+        // the pointer with a hover recognizer in hybrid mouse mode.
+        if ([controllerSupport hybridMouseEnabled]) {
+            UIHoverGestureRecognizer *mouseHoverRecognizer = [[UIHoverGestureRecognizer alloc] initWithTarget:self action:@selector(mouseHovered:)];
+            mouseHoverRecognizer.allowedTouchTypes = @[@(UITouchTypeIndirectPointer)];
+            mouseHoverRecognizer.cancelsTouchesInView = NO;
+            mouseHoverRecognizer.delegate = self;
+            [self addGestureRecognizer:mouseHoverRecognizer];
+        }
     }
     
 #if defined(__IPHONE_16_1) || defined(__TVOS_16_1)
@@ -553,7 +569,12 @@ static const double X1_MOUSE_SPEED_DIVISOR = 2.5;
                 }
                 
                 if (changedButtons & buttonFlag) {
-                    LiSendMouseButtonEvent(buttonAction, i);
+                    if ([controllerSupport hybridMouseEnabled]) {
+                        [controllerSupport sendMouseButton:i pressed:buttonAction == BUTTON_ACTION_PRESS];
+                    }
+                    else {
+                        LiSendMouseButtonEvent(buttonAction, i);
+                    }
                 }
             }
             
@@ -707,6 +728,7 @@ static const double X1_MOUSE_SPEED_DIVISOR = 2.5;
     if (normalizedLocation.x != lastMouseX || normalizedLocation.y != lastMouseY || !isMouse) {
         if (lastMouseX != 0 || lastMouseY != 0 || !isMouse) {
             LiSendMousePositionEvent(normalizedLocation.x, normalizedLocation.y, videoSize.width, videoSize.height);
+            absolutePositionsSent++;
         }
         
         if (isMouse) {
@@ -716,10 +738,64 @@ static const double X1_MOUSE_SPEED_DIVISOR = 2.5;
     }
 }
 
+- (void) hybridMouseMovedTo:(CGPoint)location {
+    // While a button is held, GCMouse sends relative motion so drags can turn
+    // a game's camera past the edge of the screen.
+    NSUInteger buttonEventCount = [controllerSupport mouseButtonEventCount];
+    if (buttonEventCount != lastHybridButtonEventCount || [controllerSupport isMouseButtonHeld]) {
+        // The host's cursor has moved away from our pointer, so make sure the
+        // next position is sent even if it matches the last one we sent.
+        lastMouseX = -1;
+        lastMouseY = -1;
+        lastHybridButtonEventCount = buttonEventCount;
+
+        if ([controllerSupport isMouseButtonHeld]) {
+            return;
+        }
+    }
+
+    [self updateCursorLocation:location isMouse:YES];
+}
+
+- (void)mouseHovered:(UIHoverGestureRecognizer*)gesture API_AVAILABLE(ios(13.0)) {
+    if (gesture.state != UIGestureRecognizerStateBegan && gesture.state != UIGestureRecognizerStateChanged) {
+        return;
+    }
+
+    if (@available(iOS 14.0, *)) {
+        // Without GCMouse, pointerInteraction:regionForRequest:defaultRegion: handles this
+        if ([GCMouse current] != nil) {
+            hybridHoverCalls++;
+            [self hybridMouseMovedTo:[gesture locationInView:self]];
+        }
+    }
+}
+
+- (BOOL)gestureRecognizer:(UIGestureRecognizer *)gestureRecognizer shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)otherGestureRecognizer {
+    // Only the hover recognizer uses us as its delegate. Don't let it block scrolling.
+    return YES;
+}
+
+- (NSString*) mouseDiagnosticsText {
+    if (![controllerSupport hybridMouseEnabled]) {
+        return nil;
+    }
+
+    return [NSString stringWithFormat:@"Hybrid mouse: region calls %lu, hover calls %lu, absolute positions sent %lu",
+            (unsigned long)hybridRegionCalls, (unsigned long)hybridHoverCalls, (unsigned long)absolutePositionsSent];
+}
+
 - (UIPointerRegion *)pointerInteraction:(UIPointerInteraction *)interaction
                        regionForRequest:(UIPointerRegionRequest *)request
                           defaultRegion:(UIPointerRegion *)defaultRegion API_AVAILABLE(ios(13.4)) {
     if (@available(iOS 14.0, *)) {
+        if ([GCMouse current] != nil && [controllerSupport hybridMouseEnabled]) {
+            hybridRegionCalls++;
+            [self hybridMouseMovedTo:request.location];
+
+            // Keep the system pointer hidden over the stream (see styleForRegion)
+            return [UIPointerRegion regionWithRect:self.bounds identifier:nil];
+        }
         if ([GCMouse current] != nil) {
             // We'll handle this with GCMouse. On iPhone, the system pointer comes from
             // AssistiveTouch, so keep it hidden over the stream (see styleForRegion)

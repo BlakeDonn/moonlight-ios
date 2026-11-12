@@ -32,6 +32,9 @@ static const double MOUSE_SPEED_DIVISOR = 1.25;
     id<ControllerSupportDelegate> _delegate;
     
     BOOL _receivedMouseButtonEvents;
+    BOOL _hybridMouse;
+    int _mouseButtonsDown;
+    NSUInteger _mouseButtonEventCount;
     float accumulatedDeltaX;
     float accumulatedDeltaY;
     float accumulatedScrollX;
@@ -849,6 +852,13 @@ static const double MOUSE_SPEED_DIVISOR = 1.25;
 
 -(void) registerMouseCallbacks:(GCMouse*) mouse API_AVAILABLE(ios(14.0)) {
     mouse.mouseInput.mouseMovedHandler = ^(GCMouseInput * _Nonnull mouse, float deltaX, float deltaY) {
+        if (self->_hybridMouse && self->_mouseButtonsDown == 0) {
+            // StreamView sends the pointer's absolute position while no button is held
+            self->accumulatedDeltaX = 0;
+            self->accumulatedDeltaY = 0;
+            return;
+        }
+
         self->accumulatedDeltaX += deltaX / MOUSE_SPEED_DIVISOR;
         self->accumulatedDeltaY += -deltaY / MOUSE_SPEED_DIVISOR;
         
@@ -865,28 +875,28 @@ static const double MOUSE_SPEED_DIVISOR = 1.25;
     
     mouse.mouseInput.leftButton.pressedChangedHandler = ^(GCControllerButtonInput * _Nonnull button, float value, BOOL pressed) {
         self->_receivedMouseButtonEvents = YES;
-        LiSendMouseButtonEvent(pressed ? BUTTON_ACTION_PRESS : BUTTON_ACTION_RELEASE, BUTTON_LEFT);
+        [self sendMouseButton:BUTTON_LEFT pressed:pressed];
     };
     mouse.mouseInput.middleButton.pressedChangedHandler = ^(GCControllerButtonInput * _Nonnull button, float value, BOOL pressed) {
         self->_receivedMouseButtonEvents = YES;
-        LiSendMouseButtonEvent(pressed ? BUTTON_ACTION_PRESS : BUTTON_ACTION_RELEASE, BUTTON_MIDDLE);
+        [self sendMouseButton:BUTTON_MIDDLE pressed:pressed];
     };
     mouse.mouseInput.rightButton.pressedChangedHandler = ^(GCControllerButtonInput * _Nonnull button, float value, BOOL pressed) {
         self->_receivedMouseButtonEvents = YES;
-        LiSendMouseButtonEvent(pressed ? BUTTON_ACTION_PRESS : BUTTON_ACTION_RELEASE, BUTTON_RIGHT);
+        [self sendMouseButton:BUTTON_RIGHT pressed:pressed];
     };
     
     if (mouse.mouseInput.auxiliaryButtons != nil) {
         if (mouse.mouseInput.auxiliaryButtons.count >= 1) {
             mouse.mouseInput.auxiliaryButtons[0].pressedChangedHandler = ^(GCControllerButtonInput * _Nonnull button, float value, BOOL pressed) {
                 self->_receivedMouseButtonEvents = YES;
-                LiSendMouseButtonEvent(pressed ? BUTTON_ACTION_PRESS : BUTTON_ACTION_RELEASE, BUTTON_X1);
+                [self sendMouseButton:BUTTON_X1 pressed:pressed];
             };
         }
         if (mouse.mouseInput.auxiliaryButtons.count >= 2) {
             mouse.mouseInput.auxiliaryButtons[1].pressedChangedHandler = ^(GCControllerButtonInput * _Nonnull button, float value, BOOL pressed) {
                 self->_receivedMouseButtonEvents = YES;
-                LiSendMouseButtonEvent(pressed ? BUTTON_ACTION_PRESS : BUTTON_ACTION_RELEASE, BUTTON_X2);
+                [self sendMouseButton:BUTTON_X2 pressed:pressed];
             };
         }
     }
@@ -1079,6 +1089,42 @@ static const double MOUSE_SPEED_DIVISOR = 1.25;
     return _receivedMouseButtonEvents;
 }
 
+-(void) sendMouseButton:(int)button pressed:(BOOL)pressed
+{
+    int flag = 1 << button;
+
+    // AssistiveTouch can deliver the same click through both UIKit and GCMouse,
+    // so in hybrid mode only send changes to the state the host already has.
+    if (_hybridMouse && pressed == ((_mouseButtonsDown & flag) != 0)) {
+        return;
+    }
+
+    if (pressed) {
+        _mouseButtonsDown |= flag;
+    }
+    else {
+        _mouseButtonsDown &= ~flag;
+    }
+    _mouseButtonEventCount++;
+
+    LiSendMouseButtonEvent(pressed ? BUTTON_ACTION_PRESS : BUTTON_ACTION_RELEASE, button);
+}
+
+-(BOOL) hybridMouseEnabled
+{
+    return _hybridMouse;
+}
+
+-(BOOL) isMouseButtonHeld
+{
+    return _mouseButtonsDown != 0;
+}
+
+-(NSUInteger) mouseButtonEventCount
+{
+    return _mouseButtonEventCount;
+}
+
 -(NSUInteger) getConnectedGamepadCount
 {
     return _controllers.count;
@@ -1094,6 +1140,12 @@ static const double MOUSE_SPEED_DIVISOR = 1.25;
     _multiController = streamConfig.multiController;
     _swapABXYButtons = streamConfig.swapABXYButtons;
     _delegate = delegate;
+
+#if !TARGET_OS_TV
+    // iPhone has no pointer lock, so its pointer stays visible over the stream. Keep the
+    // host's cursor under it while no button is held, and use relative motion for drags.
+    _hybridMouse = [UIDevice currentDevice].userInterfaceIdiom == UIUserInterfaceIdiomPhone;
+#endif
 
     _oscController = [[Controller alloc] init];
     _oscController.playerIndex = 0;
@@ -1211,6 +1263,7 @@ static const double MOUSE_SPEED_DIVISOR = 1.25;
             // Unregister for mouse events
             [self unregisterMouseCallbacks: mouse];
             self->_receivedMouseButtonEvents = NO;
+            self->_mouseButtonsDown = 0;
 
             // Re-evaluate the on-screen control mode
             [self updateAutoOnScreenControlMode];

@@ -296,7 +296,14 @@ static const CGFloat MIN_EXIT_SWIPE_DISTANCE = 100;
     NSString* overlayText = [self->_streamMan getStatsOverlayText];
     
     dispatch_async(dispatch_get_main_queue(), ^{
-        [self updateOverlayText:overlayText];
+        NSString* text = overlayText;
+#if !TARGET_OS_TV
+        NSString* mouseText = [self->_streamView mouseDiagnosticsText];
+        if (text != nil && mouseText != nil) {
+            text = [NSString stringWithFormat:@"%@\n%@", text, mouseText];
+        }
+#endif
+        [self updateOverlayText:text];
     });
 }
 

@@ -21,7 +21,7 @@
 #if TARGET_OS_TV
 @interface StreamView : UIView <X1KitMouseDelegate, UITextFieldDelegate>
 #else
-@interface StreamView : UIView <X1KitMouseDelegate, UITextFieldDelegate, UIPointerInteractionDelegate>
+@interface StreamView : UIView <X1KitMouseDelegate, UITextFieldDelegate, UIPointerInteractionDelegate, UIGestureRecognizerDelegate>
 #endif
 
 - (void) setupStreamView:(ControllerSupport*)controllerSupport
@@ -33,6 +33,7 @@
 
 #if !TARGET_OS_TV
 - (void) updateCursorLocation:(CGPoint)location isMouse:(BOOL)isMouse;
+- (NSString*) mouseDiagnosticsText;
 #endif
 
 @end
