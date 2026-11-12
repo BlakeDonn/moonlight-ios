@@ -7,9 +7,13 @@ on:
     branches:
       - iphone-hybrid-mouse
   workflow_dispatch:
+    inputs:
+      runner:
+        description: macOS runner label
+        default: macos-latest
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ inputs.runner }}
   cancel-in-progress: true
 
 permissions:
@@ -18,7 +22,7 @@ permissions:
 jobs:
   unsigned-ipa:
     name: Build unsigned iOS IPA
-    runs-on: macos-latest
+    runs-on: ${{ inputs.runner || 'macos-latest' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
