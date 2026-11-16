@@ -35,10 +35,8 @@ static const double X1_MOUSE_SPEED_DIVISOR = 2.5;
     CGPoint lastScrollTranslation;
 
     // Hybrid mouse (iPhone) state and on-screen diagnostics
-    NSUInteger lastHybridButtonEventCount;
     NSUInteger hybridRegionCalls;
     NSUInteger hybridHoverCalls;
-    NSUInteger absolutePositionsSent;
 
     // Citrix X1 mouse support
     X1Mouse* x1mouse;
@@ -728,7 +726,6 @@ static const double X1_MOUSE_SPEED_DIVISOR = 2.5;
     if (normalizedLocation.x != lastMouseX || normalizedLocation.y != lastMouseY || !isMouse) {
         if (lastMouseX != 0 || lastMouseY != 0 || !isMouse) {
             LiSendMousePositionEvent(normalizedLocation.x, normalizedLocation.y, videoSize.width, videoSize.height);
-            absolutePositionsSent++;
         }
         
         if (isMouse) {
@@ -739,22 +736,8 @@ static const double X1_MOUSE_SPEED_DIVISOR = 2.5;
 }
 
 - (void) hybridMouseMovedTo:(CGPoint)location {
-    // While a button is held, GCMouse sends relative motion so drags can turn
-    // a game's camera past the edge of the screen.
-    NSUInteger buttonEventCount = [controllerSupport mouseButtonEventCount];
-    if (buttonEventCount != lastHybridButtonEventCount || [controllerSupport isMouseButtonHeld]) {
-        // The host's cursor has moved away from our pointer, so make sure the
-        // next position is sent even if it matches the last one we sent.
-        lastMouseX = -1;
-        lastMouseY = -1;
-        lastHybridButtonEventCount = buttonEventCount;
-
-        if ([controllerSupport isMouseButtonHeld]) {
-            return;
-        }
-    }
-
-    [self updateCursorLocation:location isMouse:YES];
+    // Relative mouse: the pointer's absolute position is never sent. GCMouse
+    // deltas move the host's cursor, so it stays where the host left it.
 }
 
 - (void)mouseHovered:(UIHoverGestureRecognizer*)gesture API_AVAILABLE(ios(13.0)) {
@@ -781,8 +764,8 @@ static const double X1_MOUSE_SPEED_DIVISOR = 2.5;
         return nil;
     }
 
-    return [NSString stringWithFormat:@"Hybrid mouse: region calls %lu, hover calls %lu, absolute positions sent %lu",
-            (unsigned long)hybridRegionCalls, (unsigned long)hybridHoverCalls, (unsigned long)absolutePositionsSent];
+    return [NSString stringWithFormat:@"Relative mouse: region calls %lu, hover calls %lu, deltas sent %lu",
+            (unsigned long)hybridRegionCalls, (unsigned long)hybridHoverCalls, (unsigned long)[controllerSupport mouseDeltasSent]];
 }
 
 - (UIPointerRegion *)pointerInteraction:(UIPointerInteraction *)interaction

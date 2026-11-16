@@ -35,6 +35,7 @@ static const double MOUSE_SPEED_DIVISOR = 1.25;
     BOOL _hybridMouse;
     int _mouseButtonsDown;
     NSUInteger _mouseButtonEventCount;
+    NSUInteger _mouseDeltasSent;
     float accumulatedDeltaX;
     float accumulatedDeltaY;
     float accumulatedScrollX;
@@ -852,13 +853,6 @@ static const double MOUSE_SPEED_DIVISOR = 1.25;
 
 -(void) registerMouseCallbacks:(GCMouse*) mouse API_AVAILABLE(ios(14.0)) {
     mouse.mouseInput.mouseMovedHandler = ^(GCMouseInput * _Nonnull mouse, float deltaX, float deltaY) {
-        if (self->_hybridMouse && self->_mouseButtonsDown == 0) {
-            // StreamView sends the pointer's absolute position while no button is held
-            self->accumulatedDeltaX = 0;
-            self->accumulatedDeltaY = 0;
-            return;
-        }
-
         self->accumulatedDeltaX += deltaX / MOUSE_SPEED_DIVISOR;
         self->accumulatedDeltaY += -deltaY / MOUSE_SPEED_DIVISOR;
         
@@ -867,7 +861,8 @@ static const double MOUSE_SPEED_DIVISOR = 1.25;
         
         if (truncatedDeltaX != 0 || truncatedDeltaY != 0) {
             LiSendMouseMoveEvent(truncatedDeltaX, truncatedDeltaY);
-            
+            self->_mouseDeltasSent++;
+
             self->accumulatedDeltaX -= truncatedDeltaX;
             self->accumulatedDeltaY -= truncatedDeltaY;
         }
@@ -1125,6 +1120,11 @@ static const double MOUSE_SPEED_DIVISOR = 1.25;
     return _mouseButtonEventCount;
 }
 
+-(NSUInteger) mouseDeltasSent
+{
+    return _mouseDeltasSent;
+}
+
 -(NSUInteger) getConnectedGamepadCount
 {
     return _controllers.count;
@@ -1142,8 +1142,8 @@ static const double MOUSE_SPEED_DIVISOR = 1.25;
     _delegate = delegate;
 
 #if !TARGET_OS_TV
-    // iPhone has no pointer lock, so its pointer stays visible over the stream. Keep the
-    // host's cursor under it while no button is held, and use relative motion for drags.
+    // iPhone has no pointer lock. Send relative motion only, so the host's cursor
+    // stays where the host left it (StreamView sends no absolute position).
     _hybridMouse = [UIDevice currentDevice].userInterfaceIdiom == UIUserInterfaceIdiomPhone;
 #endif
 

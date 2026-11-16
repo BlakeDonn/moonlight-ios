@@ -5,12 +5,12 @@ name: Build iOS IPA
 on:
   push:
     branches:
-      - iphone-hybrid-mouse
+      - iphone-relative-mouse
   workflow_dispatch:
     inputs:
       runner:
         description: macOS runner label
-        default: macos-latest
+        default: macos-15-intel
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}-${{ inputs.runner }}
@@ -22,7 +22,7 @@ permissions:
 jobs:
   unsigned-ipa:
     name: Build unsigned iOS IPA
-    runs-on: ${{ inputs.runner || 'macos-latest' }}
+    runs-on: ${{ inputs.runner || 'macos-15-intel' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -66,15 +66,20 @@ jobs:
           mkdir -p "$RUNNER_TEMP/Payload"
           cp -R "$APP" "$RUNNER_TEMP/Payload/"
           cd "$RUNNER_TEMP"
-          zip -qry Moonlight-hybrid-mouse.ipa Payload
-          ls -la Moonlight-hybrid-mouse.ipa
+          # Install beside the hybrid app: own bundle id and home-screen name (unsigned, so safe to edit)
+          PLIST=Payload/Moonlight.app/Info.plist
+          /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier com.moonlight-stream.Moonlight.rel" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName 'Moonlight Rel'" "$PLIST" || /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string 'Moonlight Rel'" "$PLIST"
+          zip -qry Moonlight-relative-mouse.ipa Payload
+          ls -la Moonlight-relative-mouse.ipa
+          /usr/libexec/PlistBuddy -c "Print :CFBundleDisplayName" "$PLIST"
           /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" Payload/Moonlight.app/Info.plist
           /usr/libexec/PlistBuddy -c "Print :MinimumOSVersion" Payload/Moonlight.app/Info.plist
 
       - name: Upload unsigned IPA
         uses: actions/upload-artifact@v4
         with:
-          name: Moonlight-hybrid-mouse-ipa
-          path: ${{ runner.temp }}/Moonlight-hybrid-mouse.ipa
+          name: Moonlight-relative-mouse-ipa
+          path: ${{ runner.temp }}/Moonlight-relative-mouse.ipa
           if-no-files-found: error
           retention-days: 30

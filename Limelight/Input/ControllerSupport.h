@@ -53,10 +53,11 @@
 // Whether GCMouse has delivered mouse button events since a mouse was last disconnected
 -(BOOL) hasReceivedMouseButtonEvents;
 
-// Hybrid mouse (iPhone): absolute position while no button is held, relative motion while one is
+// Relative mouse (iPhone): GCMouse relative motion always, the pointer's absolute position never
 -(BOOL) hybridMouseEnabled;
 -(void) sendMouseButton:(int)button pressed:(BOOL)pressed;
 -(BOOL) isMouseButtonHeld;
 -(NSUInteger) mouseButtonEventCount;
+-(NSUInteger) mouseDeltasSent;
 
 @end
